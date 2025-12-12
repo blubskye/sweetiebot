@@ -11,8 +11,52 @@ Sweetie Bot is an administration bot for Discord servers. Her primary function i
 - Updated to Go 1.25+ with Go modules support
 - Owner ID is now configured via file instead of being hardcoded
 - Replaced deprecated `ioutil` package with modern `os` equivalents
+- Added SQL LIKE wildcard escaping to prevent pattern injection
 - Improved installation documentation with clearer MariaDB setup instructions
 - Updated for modern MariaDB versions (10.5+)
+
+## Self-Hosting Quick Start
+
+For detailed instructions, see [INSTALLATION.md](INSTALLATION.md).
+
+### Requirements
+
+- Go 1.25+
+- MariaDB 10.5+
+
+### Database Setup
+
+1. Install MariaDB and create the database:
+
+```bash
+mariadb -u root -p -e "CREATE DATABASE sweetiebot CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+```
+
+2. Import the schema and timezone data:
+
+```bash
+mariadb -u root -p sweetiebot < sweetiebot.sql
+mariadb -u root -p sweetiebot < sweetiebot_tz.sql
+```
+
+### Configuration Files
+
+Create these files in the `main/` directory:
+
+| File | Contents |
+|------|----------|
+| `db.auth` | Database connection string: `root:PASSWORD@tcp(127.0.0.1:3306)/sweetiebot?parseTime=true&collation=utf8mb4_general_ci` |
+| `token` | Your Discord bot token from the [Developer Portal](https://discord.com/developers/applications) |
+| `mainguild` | Your Discord server ID (enable Developer Mode to copy it) |
+| `owner` | Your Discord user ID (for owner-only commands) |
+
+### Build and Run
+
+```bash
+cd main
+go build
+./main
+```
 
 ## Adding Sweetiebot To Your Server
 
