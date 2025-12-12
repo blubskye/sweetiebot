@@ -455,9 +455,9 @@ func (c *getAuditCommand) Process(args []string, msg *discordgo.Message, indices
 					search = "%"
 				}
 				if args[i][0] == '$' {
-					search += msg.Content[indices[i]+1:] + "%"
+					search += EscapeLikeWildcards(msg.Content[indices[i]+1:]) + "%"
 				} else {
-					search += msg.Content[indices[i]:] + "%"
+					search += EscapeLikeWildcards(msg.Content[indices[i]:]) + "%"
 				}
 				i = len(args)
 			default:

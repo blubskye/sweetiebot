@@ -3,8 +3,8 @@ package sweetiebot
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math/rand"
+	"os"
 	"regexp"
 	"sort"
 	"strconv"
@@ -13,6 +13,16 @@ import (
 
 	"github.com/blackhole12/discordgo"
 )
+
+// EscapeLikeWildcards escapes SQL LIKE pattern metacharacters (% and _) in user input
+// to prevent users from injecting wildcards that alter search behavior.
+// The backslash is also escaped since it's the escape character.
+func EscapeLikeWildcards(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\") // Escape backslash first
+	s = strings.ReplaceAll(s, "%", "\\%")
+	s = strings.ReplaceAll(s, "_", "\\_")
+	return s
+}
 
 // Pluralize converts i to a string, then appends str to the end, then appends s if it's plural
 func Pluralize(i int64, str string) string {
@@ -261,7 +271,7 @@ func ApplyTimezone(t time.Time, info *GuildInfo, user *discordgo.User) time.Time
 }
 
 func ingestEpisode(file string, season int, episode int) {
-	f, err := ioutil.ReadFile(file)
+	f, err := os.ReadFile(file)
 	if err != nil {
 		fmt.Println(err.Error())
 	}
@@ -397,13 +407,14 @@ func FindUsername(user string, info *GuildInfo) []uint64 {
 			username = strings.ToLower(user)
 		}
 	}
-	r := sb.db.FindGuildUsers(user, 20, 0, SBatoi(info.ID))
+	escapedUser := EscapeLikeWildcards(user)
+	r := sb.db.FindGuildUsers(escapedUser, 20, 0, SBatoi(info.ID))
 	if len(r) == 0 {
-		user = "%" + user + "%"
-		r = sb.db.FindGuildUsers(user, 20, 0, SBatoi(info.ID))
+		escapedUser = "%" + escapedUser + "%"
+		r = sb.db.FindGuildUsers(escapedUser, 20, 0, SBatoi(info.ID))
 	}
 	if len(r) == 0 {
-		r = sb.db.FindUsers(user, 20, 0)
+		r = sb.db.FindUsers(escapedUser, 20, 0)
 	}
 	if len(discriminant) > 0 {
 		for _, v := range r {

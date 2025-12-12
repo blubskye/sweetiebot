@@ -1,14 +1,14 @@
 package main
 
 import (
-	"io/ioutil"
+	"os"
 	"strings"
 
-	"../sweetiebot"
+	"github.com/blackhole12/sweetiebot/sweetiebot"
 )
 
 func main() {
-	token, _ := ioutil.ReadFile("token")
+	token, _ := os.ReadFile("token")
 	bot := sweetiebot.New(strings.TrimSpace(string(token)))
 	if bot != nil {
 		bot.Connect()

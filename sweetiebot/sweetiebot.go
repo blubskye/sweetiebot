@@ -4,8 +4,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"math/rand"
 	"os"
 	"regexp"
 	"strconv"
@@ -302,7 +300,7 @@ func channelIsPrivate(channelID string) (*discordgo.Channel, bool) {
 
 // ChangeBotName changes the username and avatar of the bot
 func ChangeBotName(s *discordgo.Session, name string, avatarfile string) {
-	binary, _ := ioutil.ReadFile(avatarfile)
+	binary, _ := os.ReadFile(avatarfile)
 	avatar := base64.StdEncoding.EncodeToString(binary)
 
 	_, err := s.UserUpdate("", "", name, "data:image/png;base64,"+avatar, "")
@@ -318,7 +316,7 @@ func sbReady(s *discordgo.Session, r *discordgo.Ready) {
 	fmt.Println("Ready message receieved, waiting for guilds...")
 	sb.SelfID = r.User.ID
 	sb.SelfAvatar = r.User.Avatar
-	isuser, _ := ioutil.ReadFile("isuser") // THIS FILE SHOULD NOT EXIST UNLESS YOU WANT TO BE IN USER MODE. If you don't know what user mode is, you don't want it.
+	isuser, _ := os.ReadFile("isuser") // THIS FILE SHOULD NOT EXIST UNLESS YOU WANT TO BE IN USER MODE. If you don't know what user mode is, you don't want it.
 	if r.Guilds != nil && isuser != nil {
 		for _, G := range r.Guilds {
 			AttachToGuild(G)
@@ -373,11 +371,11 @@ func AttachToGuild(g *discordgo.Guild) {
 		lockdown:     -1,
 		lastlogerr:   0,
 	}
-	config, err := ioutil.ReadFile(g.ID + ".json")
+	config, err := os.ReadFile(g.ID + ".json")
 	disableall := false
 	if err != nil {
 		fmt.Println("New Guild Detected: " + g.Name)
-		config, _ = ioutil.ReadFile("default.json")
+		config, _ = os.ReadFile("default.json")
 		ch, e := sb.dg.UserChannelCreate(g.OwnerID)
 		if e == nil {
 			sb.db.SetDefaultServer(SBatoi(g.OwnerID), SBatoi(g.ID)) // This ensures no one blows up another server by accident
@@ -1155,22 +1153,34 @@ func (log *emptyLog) LogError(msg string, err error) {
 
 // New creates and initializes a new instance of Sweetiebot that's ready to connect. Returns nil on error.
 func New(token string) *SweetieBot {
-	dbauth, dberr := ioutil.ReadFile("db.auth")
+	dbauth, dberr := os.ReadFile("db.auth")
 	if dberr != nil {
 		fmt.Println("db.auth cannot be found. Please add the file with the correct format as specified in INSTALLATION.md")
 	}
-	mainguild, gerr := ioutil.ReadFile("mainguild")
+	mainguild, gerr := os.ReadFile("mainguild")
 	if gerr != nil {
 		fmt.Println("mainguild cannot be found. Please add the file with the correct format as specified in INSTALLATION.md")
 	}
-	debugchannels, debugerr := ioutil.ReadFile("debug")
-	rand.Seed(time.Now().UTC().Unix())
+	debugchannels, debugerr := os.ReadFile("debug")
+
+	// Load owner ID from file (falls back to empty if not found)
+	owners := make(map[uint64]bool)
+	ownerData, ownerErr := os.ReadFile("owner")
+	if ownerErr != nil {
+		fmt.Println("owner file not found. Please create a file named 'owner' containing your Discord user ID.")
+		fmt.Println("See INSTALLATION.md for instructions on how to get your user ID.")
+	} else {
+		ownerID := SBatoi(strings.TrimSpace(string(ownerData)))
+		if ownerID != 0 {
+			owners[ownerID] = true
+		}
+	}
 
 	mainguildid := SBatoi(strings.TrimSpace(string(mainguild)))
 	sb = &SweetieBot{
-		version:            Version{0, 9, 8, 14},
+		version:            Version{0, 9, 9, 0},
 		Debug:              false,
-		Owners:             map[uint64]bool{95585199324143616: true},
+		Owners:             owners,
 		RestrictedCommands: map[string]bool{"search": true, "lastping": true, "setstatus": true},
 		NonServerCommands:  map[string]bool{"about": true, "roll": true, "episodegen": true, "bestpony": true, "episodequote": true, "help": true, "listguilds": true, "update": true, "announce": true, "dumptables": true, "defaultserver": true},
 		MainGuildID:        mainguildid,
@@ -1184,6 +1194,7 @@ func New(token string) *SweetieBot {
 		heartbeat:          4294967290,
 		MessageCount:       0,
 		changelog: map[int]string{
+			AssembleVersion(0, 9, 9, 0):  "- Modernized codebase for Go 1.25+\n- Owner ID now loaded from 'owner' file instead of being hardcoded\n- Replaced deprecated ioutil package with os package\n- Added Go modules support (go.mod)\n- Improved installation documentation with clearer MariaDB setup instructions\n- Added SQL LIKE wildcard escaping to prevent pattern injection in search queries\n- Improved string building efficiency in search command using strings.Builder",
 			AssembleVersion(0, 9, 8, 14): "- Reduce database pressure on startup",
 			AssembleVersion(0, 9, 8, 13): "- Fix crash on startup.\n- Did more code refactoring, fixed several spelling errors.",
 			AssembleVersion(0, 9, 8, 12): "- Do bulk member insertions in single batch to reduce database pressure.\n- Removed bestpony command\n- Did large internal code refactor",
@@ -1301,7 +1312,7 @@ func New(token string) *SweetieBot {
 	if debugerr == nil && len(debugchannels) > 0 {
 		json.Unmarshal(debugchannels, sb)
 	}
-	dbguilds, err := ioutil.ReadFile("db.guilds")
+	dbguilds, err := os.ReadFile("db.guilds")
 	if err == nil && len(dbguilds) > 0 {
 		json.Unmarshal(dbguilds, sb)
 	}
@@ -1327,7 +1338,7 @@ func New(token string) *SweetieBot {
 		}
 	}
 
-	isuser, _ := ioutil.ReadFile("isuser") // DO NOT CREATE THIS FILE UNLESS YOU KNOW *EXACTLY* WHAT YOU ARE DOING. This is for crazy people who want to run sweetiebot in user mode. If you don't know what user mode is, you don't want it. If you create this file anyway and the bot breaks, it's your own fault.
+	isuser, _ := os.ReadFile("isuser") // DO NOT CREATE THIS FILE UNLESS YOU KNOW *EXACTLY* WHAT YOU ARE DOING. This is for crazy people who want to run sweetiebot in user mode. If you don't know what user mode is, you don't want it. If you create this file anyway and the bot breaks, it's your own fault.
 	if isuser == nil {
 		sb.dg, err = discordgo.New("Bot " + token)
 	} else {

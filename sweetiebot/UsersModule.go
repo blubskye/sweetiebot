@@ -333,14 +333,15 @@ func (c *setTimeZoneCommand) Process(args []string, msg *discordgo.Message, indi
 		return "```You have to specify what your timezone is!```", false, nil
 	}
 	tz := []string{}
+	escapedArg := EscapeLikeWildcards(args[0])
 	if len(args) < 2 {
-		tz = sb.db.FindTimeZone("%" + args[0] + "%")
+		tz = sb.db.FindTimeZone("%" + escapedArg + "%")
 	} else {
 		offset, err := strconv.Atoi(args[1])
 		if err != nil {
 			return "```Could not parse offset. Note that timezones do not have spaces - use underscores (_) instead. The second argument should be your time difference from GMT in hours. For example, PDT is GMT-7, so you could search for \"America -7\".```", false, nil
 		}
-		tz = sb.db.FindTimeZoneOffset("%"+args[0]+"%", offset*60)
+		tz = sb.db.FindTimeZoneOffset("%"+escapedArg+"%", offset*60)
 	}
 
 	if len(tz) < 1 {

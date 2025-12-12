@@ -134,7 +134,7 @@ func (c *searchCommand) Process(args []string, msg *discordgo.Message, indices [
 	message := strings.Join(messages, " ")
 	if len(messages) > 0 {
 		query += "C.Message LIKE ? AND "
-		params = append(params, "%"+message+"%")
+		params = append(params, "%"+EscapeLikeWildcards(message)+"%")
 	}
 
 	if t.Before(time.Now().UTC()) {
@@ -194,10 +194,15 @@ func (c *searchCommand) Process(args []string, msg *discordgo.Message, indices [
 	if count == 1 {
 		strmatch = " match"
 	} // I hate plural forms
-	ret := "```Search results: " + strconv.Itoa(count) + strmatch + ".```\n"
+
+	var result strings.Builder
+	result.WriteString("```Search results: ")
+	result.WriteString(strconv.Itoa(count))
+	result.WriteString(strmatch)
+	result.WriteString(".```\n")
 
 	if rangebegin < 0 || rangeend < 0 {
-		return ret, false, nil
+		return result.String(), false, nil
 	}
 
 	if rangeend >= 0 {
@@ -238,9 +243,16 @@ func (c *searchCommand) Process(args []string, msg *discordgo.Message, indices [
 	}
 
 	for _, v := range r {
-		ret += "[" + ApplyTimezone(v.Timestamp, info, msg.Author).Format("1/2 3:04:05PM") + "] " + v.Author + ": " + MsgHighlightMatch(v.Message, message) + "\n"
+		result.WriteString("[")
+		result.WriteString(ApplyTimezone(v.Timestamp, info, msg.Author).Format("1/2 3:04:05PM"))
+		result.WriteString("] ")
+		result.WriteString(v.Author)
+		result.WriteString(": ")
+		result.WriteString(MsgHighlightMatch(v.Message, message))
+		result.WriteString("\n")
 	}
 
+	ret := result.String()
 	ret = strings.Replace(ret, "http://", "http\u200B://", -1)
 	ret = strings.Replace(ret, "https://", "https\u200B://", -1)
 	return ReplaceAllMentions(ret), len(r) > 5, nil

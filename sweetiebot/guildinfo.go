@@ -3,7 +3,7 @@ package sweetiebot
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -49,7 +49,7 @@ func (info *GuildInfo) SaveConfig() {
 		if len(data) > sb.MaxConfigSize {
 			info.Log("Error saving config file: Config file is too large! Config files cannot exceed " + strconv.Itoa(sb.MaxConfigSize) + " bytes.")
 		} else {
-			err = ioutil.WriteFile(info.ID+".json", data, 0664)
+			err = os.WriteFile(info.ID+".json", data, 0664)
 			if err != nil {
 				info.Log("Error saving config file: ", err.Error())
 			}

@@ -1,13 +1,18 @@
-# Sweetie Bot
-[![GoDoc](https://godoc.org/github.com/blackhole12/sweetiebot?status.svg)](https://godoc.org/github.com/blackhole12/sweetiebot/sweetiebot) [![Go report](http://goreportcard.com/badge/blackhole12/sweetiebot)](http://goreportcard.com/report/blackhole12/sweetiebot) [![Sweetie Bot Discord](https://img.shields.io/badge/Discord-%23sweetie%20bot-blue.svg)](https://discord.gg/t2gVQvN)
+# Sweetie Bot (Community Fork)
 
-Sweetie Bot is an administration bot for Discord servers. Her primary function is anti-spam, by detecting potential spammers, silencing them, and deleting their messages. This helps immunize the chat against bot raids. If [self-hosted](https://github.com/blackhole12/sweetiebot/blob/master/INSTALLATION.md), she also keeps a log of the chat and its users.
+> **Note:** This is a community-maintained fork of Sweetie Bot. The original project by Erik McClure (blackhole12) was abandoned in 2017. This fork has been updated to work with modern Go versions and includes improved documentation for self-hosting.
 
-### To add Sweetie Bot to your server, use [this link](https://discordapp.com/oauth2/authorize?client_id=171790139712864257&scope=bot&permissions=535948390).
+[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8?style=flat&logo=go)](https://golang.org/dl/)
 
-**If you have questions about Sweetie Bot, please join its [support channel](https://discord.gg/t2gVQvN)**
+Sweetie Bot is an administration bot for Discord servers. Her primary function is anti-spam, by detecting potential spammers, silencing them, and deleting their messages. This helps immunize the chat against bot raids. When self-hosted, she also keeps a log of the chat and its users.
 
-**If you use Sweetie Bot, consider [contributing to its Patreon](https://www.patreon.com/erikmcclure) to help pay for hosting and maintenence costs.**
+## Changes in This Fork
+
+- Updated to Go 1.25+ with Go modules support
+- Owner ID is now configured via file instead of being hardcoded
+- Replaced deprecated `ioutil` package with modern `os` equivalents
+- Improved installation documentation with clearer MariaDB setup instructions
+- Updated for modern MariaDB versions (10.5+)
 
 ## Adding Sweetiebot To Your Server
 
