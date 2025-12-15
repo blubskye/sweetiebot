@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // QuoteModule manages the quoting system

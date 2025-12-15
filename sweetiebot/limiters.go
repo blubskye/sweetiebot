@@ -1,20 +1,23 @@
 package sweetiebot
 
 import (
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
 // AtomicFlag represents an atomic bit that can be set or cleared
+// Kept for backwards compatibility with db.go statuslock
 type AtomicFlag struct {
 	flag uint32
 }
 
 // SaturationLimit tracks when events occured and implements a saturation limit on them
+// Go 1.25 optimization: Replaced spinlock with sync.Mutex to avoid CPU-burning busy-wait
 type SaturationLimit struct {
 	times []int64
 	index int
-	lock  AtomicFlag
+	lock  sync.Mutex
 }
 
 func realmod(x int, m int) int {
@@ -33,58 +36,56 @@ func (f *AtomicFlag) clear() {
 	atomic.SwapUint32(&f.flag, 0)
 }
 
-func (s *SaturationLimit) append(time int64) {
-	for s.lock.test_and_set() {
-	}
+func (s *SaturationLimit) append(t int64) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	s.index = realmod(s.index+1, len(s.times))
-	s.times[s.index] = time
-	s.lock.clear()
+	s.times[s.index] = t
 }
 
 // Used for our own saturation limits, where we check to see if sending the message would violate our limit BEFORE we actually send it.
 func (s *SaturationLimit) check(num int, period int64, curtime int64) bool {
-	for s.lock.test_and_set() {
-	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	i := realmod(s.index-(num-1), len(s.times))
-	b := (curtime - s.times[i]) <= period
-	s.lock.clear()
-	return b
+	return (curtime - s.times[i]) <= period
 }
 
 // Used for spam detection, where we always insert the message first (because it's already happened) and THEN check to see if it violated the limit.
 func (s *SaturationLimit) checkafter(num int, period int64) bool {
-	for s.lock.test_and_set() {
-	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	i := realmod(s.index-num, len(s.times))
-	b := (s.times[s.index] - s.times[i]) <= period
-	s.lock.clear()
-	return b
+	return (s.times[s.index] - s.times[i]) <= period
 }
 
 func (s *SaturationLimit) resize(size int) {
-	for s.lock.test_and_set() {
-	}
+	s.lock.Lock()
+	defer s.lock.Unlock()
 	n := make([]int64, size, size)
 	copy(n, s.times)
 	s.times = n
-	s.lock.clear()
 }
 
 // CheckRateLimit performs a check on the rate limit without updating it
 func CheckRateLimit(prevtime *int64, interval int64) bool {
-	return time.Now().UTC().Unix()-(*prevtime) > interval
+	return time.Now().UTC().Unix()-atomic.LoadInt64(prevtime) > interval
 }
 
 // RateLimit checks the rate limit, returns false if it was violated, and updates the rate limit
+// Go 1.25 optimization: Fixed race condition with proper atomic CAS loop
 func RateLimit(prevtime *int64, interval int64) bool {
 	t := time.Now().UTC().Unix()
-	d := (*prevtime) // perform a read so it doesn't change on us
-	if t-d > interval {
-		*prevtime = t // CompareAndSwapInt64 doesn't work on x86, temporarily removing this
-		return true
-		//return atomic.CompareAndSwapInt64(prevtime, d, t) // If the swapped failed, it means another thread already sent a message and swapped it out, so don't send a message.
+	for {
+		d := atomic.LoadInt64(prevtime)
+		if t-d <= interval {
+			return false
+		}
+		if atomic.CompareAndSwapInt64(prevtime, d, t) {
+			return true
+		}
+		// CAS failed, another goroutine updated - retry
 	}
-	return false
 }
 
 // AtomicBool represents an atomic boolean that can be set to true or false

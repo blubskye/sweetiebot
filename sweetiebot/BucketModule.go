@@ -7,7 +7,7 @@ import (
 
 	"fmt"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // BucketModule manages Sweetie's bucket

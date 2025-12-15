@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 var diceregex = regexp.MustCompile("[0-9]*d[0-9]+")
@@ -126,7 +126,6 @@ func (c *rollCommand) eval2ArgFunc(args []string, index *int, fn func(float64, f
 		r := c.eval(args, index, info)
 		if c.eatSymbols(args, index, ",") != 0 {
 			panic("Expression missing second argument: " + strings.Join(args, ""))
-			return 0.0
 		}
 		r2 := c.eval(args, index, info)
 		if c.eatSymbols(args, index, ")") != 0 {

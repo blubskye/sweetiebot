@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"os"
 	"regexp"
 	"strconv"
@@ -12,7 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // BotConfig lists all bot configuration options, grouped into structs
@@ -224,8 +225,7 @@ type SweetieBot struct {
 	quit               AtomicBool
 	guilds             map[uint64]*GuildInfo
 	guildsLock         sync.RWMutex
-	LastMessages       map[string]int64
-	LastMessagesLock   sync.RWMutex
+	LastMessages       sync.Map // map[string]int64 - lock-free for hot path
 	MaxConfigSize      int
 	StartTime          int64
 	MessageCount       uint32 // 32-bit so we can do atomic ops on a 32-bit platform
@@ -303,7 +303,8 @@ func ChangeBotName(s *discordgo.Session, name string, avatarfile string) {
 	binary, _ := os.ReadFile(avatarfile)
 	avatar := base64.StdEncoding.EncodeToString(binary)
 
-	_, err := s.UserUpdate("", "", name, "data:image/png;base64,"+avatar, "")
+	// API changed in newer discordgo - now just username and avatar
+	_, err := s.UserUpdate(name, "data:image/png;base64,"+avatar)
 	if err != nil {
 		fmt.Println(err.Error())
 	} else {
@@ -311,7 +312,7 @@ func ChangeBotName(s *discordgo.Session, name string, avatarfile string) {
 	}
 }
 
-//func sbEvent(s *discordgo.Session, e *discordgo.Event) { ApplyFuncRange(len(info.hooks.OnEvent), func(i int) { if(ProcessModule("", info.hooks.OnEvent[i])) { info.hooks.OnEvent[i].OnEvent(s, e) } }) }
+// func sbEvent(s *discordgo.Session, e *discordgo.Event) { ApplyFuncRange(len(info.hooks.OnEvent), func(i int) { if(ProcessModule("", info.hooks.OnEvent[i])) { info.hooks.OnEvent[i].OnEvent(s, e) } }) }
 func sbReady(s *discordgo.Session, r *discordgo.Ready) {
 	fmt.Println("Ready message receieved, waiting for guilds...")
 	sb.SelfID = r.User.ID
@@ -365,7 +366,7 @@ func AttachToGuild(g *discordgo.Guild) {
 		Name:         g.Name,
 		OwnerID:      g.OwnerID,
 		commandLast:  make(map[string]map[string]int64),
-		commandlimit: &SaturationLimit{[]int64{}, 0, AtomicFlag{0}},
+		commandlimit: &SaturationLimit{times: []int64{}, index: 0},
 		commands:     make(map[string]Command),
 		emotemodule:  nil,
 		lockdown:     -1,
@@ -786,9 +787,7 @@ func sbMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	t := time.Now().UTC().Unix()
-	sb.LastMessagesLock.Lock()
-	sb.LastMessages[m.ChannelID] = t
-	sb.LastMessagesLock.Unlock()
+	sb.LastMessages.Store(m.ChannelID, t)
 
 	ch, private := channelIsPrivate(m.ChannelID)
 	var info *GuildInfo
@@ -1054,10 +1053,8 @@ func idleCheckLoop() {
 				}
 			}
 			for _, ch := range channels {
-				sb.LastMessagesLock.RLock()
-				t, exists := sb.LastMessages[ch.ID]
-				sb.LastMessagesLock.RUnlock()
-				if exists {
+				if v, exists := sb.LastMessages.Load(ch.ID); exists {
+					t := v.(int64)
 					diff := time.Now().UTC().Sub(time.Unix(t, 0))
 
 					for _, h := range info.hooks.OnIdle {
@@ -1111,13 +1108,13 @@ func deadlockDetector() {
 			continue
 		}
 		m := discordgo.MessageCreate{
-			&discordgo.Message{ChannelID: "heartbeat", Content: info.config.Basic.CommandPrefix + "about",
+			Message: &discordgo.Message{ChannelID: "heartbeat", Content: info.config.Basic.CommandPrefix + "about",
 				Author: &discordgo.User{
 					ID:       sb.SelfID,
 					Verified: true,
 					Bot:      true,
 				},
-				Timestamp: discordgo.Timestamp(time.Now().UTC().Format(time.RFC3339Nano)),
+				Timestamp: time.Now().UTC(),
 			},
 		}
 		sb.locknumber = 0
@@ -1187,9 +1184,8 @@ func New(token string) *SweetieBot {
 		DBGuilds:           make(map[uint64]bool),
 		DebugChannels:      make(map[string]string),
 		quit:               AtomicBool{0},
-		guilds:             make(map[uint64]*GuildInfo),
-		LastMessages:       make(map[string]int64),
-		MaxConfigSize:      1000000,
+		guilds:        make(map[uint64]*GuildInfo),
+		MaxConfigSize: 1000000,
 		StartTime:          time.Now().UTC().Unix(),
 		heartbeat:          4294967290,
 		MessageCount:       0,

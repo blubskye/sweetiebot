@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // EscapeLikeWildcards escapes SQL LIKE pattern metacharacters (% and _) in user input
@@ -46,7 +46,12 @@ func TimeDiff(d time.Duration) string {
 	minutes := (seconds - (days * 86400) - (hours * 3600)) / 60
 
 	if days == 0 && minutes > 2 {
-		return Pluralize(hours, " hour") + " and " + Pluralize(minutes, " minute")
+		var sb strings.Builder
+		sb.Grow(32)
+		sb.WriteString(Pluralize(hours, " hour"))
+		sb.WriteString(" and ")
+		sb.WriteString(Pluralize(minutes, " minute"))
+		return sb.String()
 	}
 	if days == 0 {
 		return Pluralize(hours, " hour")
@@ -55,10 +60,20 @@ func TimeDiff(d time.Duration) string {
 		return Pluralize(days/365, " year")
 	}
 	if days >= 365 {
-		return Pluralize(days/365, " year") + " and " + Pluralize(days%365, " day")
+		var sb strings.Builder
+		sb.Grow(32)
+		sb.WriteString(Pluralize(days/365, " year"))
+		sb.WriteString(" and ")
+		sb.WriteString(Pluralize(days%365, " day"))
+		return sb.String()
 	}
 	if hours > 1 {
-		return Pluralize(days, " day") + " and " + Pluralize(hours, " hour")
+		var sb strings.Builder
+		sb.Grow(32)
+		sb.WriteString(Pluralize(days, " day"))
+		sb.WriteString(" and ")
+		sb.WriteString(Pluralize(hours, " hour"))
+		return sb.String()
 	}
 	return Pluralize(days, " day")
 }
@@ -228,7 +243,8 @@ func (info *GuildInfo) GetMemberCreate(u *discordgo.User) *discordgo.Member {
 
 	m, err = sb.dg.GuildMember(info.ID, u.ID)
 	if err != nil || m == nil {
-		m = &discordgo.Member{info.ID, "", "", false, false, u, []string{}}
+		// Use named fields for newer discordgo Member struct
+		m = &discordgo.Member{GuildID: info.ID, User: u, Roles: []string{}}
 	}
 	sb.dg.State.MemberAdd(m)
 	return m
@@ -440,15 +456,15 @@ func GetCommandsInOrder(m map[string]Command) []string {
 
 // MapGetRandomItem returns a random item from a map without removing it
 func MapGetRandomItem(m map[string]bool) string {
-	index := rand.Intn(len(m))
-	for k := range m {
-		if index == 0 {
-			return k
-		}
-		index--
+	if len(m) == 0 {
+		return "SOMETHING IMPOSSIBLE HAPPENED IN UTIL.GO MapGetRandomItem()! Somebody drag Cloud Hop out of bed and tell him his bot is broken."
 	}
-
-	return "SOMETHING IMPOSSIBLE HAPPENED IN UTIL.GO MapGetRandomItem()! Somebody drag Cloud Hop out of bed and tell him his bot is broken."
+	// Build slice once and select randomly - O(n) instead of O(n) average with better cache locality
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys[rand.Intn(len(keys))]
 }
 
 // MapToSlice for map[string]bool
@@ -571,12 +587,16 @@ func ReplaceAllRolePings(s string, info *GuildInfo) string {
 		return s
 	}
 
+	// Build map once for O(1) lookups instead of O(n) per match
+	roleMap := make(map[string]string, len(roles))
+	for _, v := range roles {
+		roleMap[v.ID] = v.Name
+	}
+
 	return roleregex.ReplaceAllStringFunc(s, func(s string) string {
 		r := StripPing(s)
-		for _, v := range roles {
-			if v.ID == r {
-				return v.Name
-			}
+		if name, ok := roleMap[r]; ok {
+			return name
 		}
 		return s
 	})
@@ -626,7 +646,7 @@ type legacyBotConfig struct {
 	MaxAttachSpam         int                        `json:"maxattachspam"`
 	MaxPingSpam           int                        `json:"maxpingspam"`
 	MaxMessageSpam        map[int64]int              `json:"maxmessagespam"`
-	MaxSpamRemoveLookback int                        `json:maxspamremovelookback`
+	MaxSpamRemoveLookback int                        `json:"maxspamremovelookback"`
 	IgnoreInvalidCommands bool                       `json:"ignoreinvalidcommands"`
 	UseMemberNames        bool                       `json:"usemembernames"`
 	Importable            bool                       `json:"importable"`
@@ -646,10 +666,10 @@ type legacyBotConfig struct {
 	FreeChannels          map[string]bool            `json:"freechannels"`
 	Command_roles         map[string]map[string]bool `json:"command_roles"`
 	Command_channels      map[string]map[string]bool `json:"command_channels"`
-	Command_limits        map[string]int64           `json:command_limits`
-	Command_disabled      map[string]bool            `json:command_disabled`
-	Module_disabled       map[string]bool            `json:module_disabled`
-	Module_channels       map[string]map[string]bool `json:module_channels`
+	Command_limits        map[string]int64           `json:"command_limits"`
+	Command_disabled      map[string]bool            `json:"command_disabled"`
+	Module_disabled       map[string]bool            `json:"module_disabled"`
+	Module_channels       map[string]map[string]bool `json:"module_channels"`
 	Collections           map[string]map[string]bool `json:"collections"`
 	Groups                map[string]map[string]bool `json:"groups"`
 	Quotes                map[uint64][]string        `json:"quotes"`
@@ -850,14 +870,16 @@ func MigrateSettings(config []byte, guild *GuildInfo) error {
 
 			for k, v := range legacy.Basic.Groups {
 				role := k
-				check, err := GetRoleByName(role, guild)
+				check, _ := GetRoleByName(role, guild)
 				if check != nil {
 					role = "sb-" + role
 				}
-				r, err := sb.dg.GuildRoleCreate(guild.ID)
-				if err == nil {
-					r, err = sb.dg.GuildRoleEdit(guild.ID, r.ID, role, 0, false, 0, true)
-				}
+				// Use new discordgo RoleParams API
+				mentionable := true
+				r, err := sb.dg.GuildRoleCreate(guild.ID, &discordgo.RoleParams{
+					Name:        role,
+					Mentionable: &mentionable,
+				})
 				if err == nil {
 					idmap[strings.ToLower(k)] = r.ID
 					guild.config.Users.Roles[SBatoi(r.ID)] = true
@@ -1085,18 +1107,18 @@ func setupSilenceRole(info *GuildInfo) {
 		}
 		for _, ch := range guild.Channels {
 			if SBatoi(ch.ID) != info.config.Users.WelcomeChannel {
-				allow := 0
-				deny := 0
+				var allow int64 = 0
+				var deny int64 = 0
 				for _, v := range ch.PermissionOverwrites {
-					if strings.ToLower(v.Type) == "role" && SBatoi(v.ID) == info.config.Spam.SilentRole {
+					if v.Type == discordgo.PermissionOverwriteTypeRole && SBatoi(v.ID) == info.config.Spam.SilentRole {
 						allow = v.Allow
 						deny = v.Deny
 						break
 					}
 				}
-				allow &= (^0x00000800)
+				allow &= (^int64(0x00000800))
 				deny |= 0x00000800
-				sb.dg.ChannelPermissionSet(ch.ID, SBitoa(info.config.Spam.SilentRole), "role", allow, deny)
+				sb.dg.ChannelPermissionSet(ch.ID, SBitoa(info.config.Spam.SilentRole), discordgo.PermissionOverwriteTypeRole, allow, deny)
 			}
 		}
 	}

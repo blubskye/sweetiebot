@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // UsersModule contains commands for getting and setting user information
@@ -423,13 +423,14 @@ func (c *userInfoCommand) Process(args []string, msg *discordgo.Message, indices
 		}
 		m.User = u
 	}
-	if dbmember != nil && len(dbmember.JoinedAt) > 0 {
+	// In newer discordgo, JoinedAt is time.Time directly
+	if dbmember != nil && !dbmember.JoinedAt.IsZero() {
 		m.JoinedAt = dbmember.JoinedAt
 	}
 	authortz := getTimezone(info, msg.Author)
-	joinedat, err := time.Parse(time.RFC3339, m.JoinedAt)
+	joinedat := m.JoinedAt
 	joined := ""
-	if err == nil {
+	if !joinedat.IsZero() {
 		joined = TimeDiff(time.Now().UTC().Sub(joinedat.In(authortz))) + " ago (" + joinedat.In(authortz).Format(time.RFC822) + ")"
 	}
 

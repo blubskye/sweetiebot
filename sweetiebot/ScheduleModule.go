@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // ScheduleModule manages the scheduling system

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 type MiscModule struct {

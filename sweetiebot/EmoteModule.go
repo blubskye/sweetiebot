@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // EmoteModule detects banned emotes and deletes them

@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 type logger interface {
@@ -439,7 +439,7 @@ func (info *GuildInfo) SwapStatusLoop() {
 			}
 			time.Sleep(time.Duration(d) * time.Second) // Prevent you from setting this to 0 because that's bad
 			if len(info.config.Basic.Collections["status"]) > 0 {
-				sb.dg.UpdateStatus(0, MapGetRandomItem(info.config.Basic.Collections["status"]))
+				sb.dg.UpdateGameStatus(0, MapGetRandomItem(info.config.Basic.Collections["status"]))
 			}
 		}
 	}
@@ -458,9 +458,10 @@ func (info *GuildInfo) IsDebug(channel string) bool {
 func (info *GuildInfo) ProcessMember(u *discordgo.Member) {
 	ProcessUser(u.User, nil)
 
-	t := time.Now().UTC()
-	if len(u.JoinedAt) > 0 { // Parse join date and update user table only if it is less than our current first seen date.
-		t, _ = time.Parse(time.RFC3339, u.JoinedAt)
+	// In newer discordgo, JoinedAt is already time.Time
+	t := u.JoinedAt
+	if t.IsZero() {
+		t = time.Now().UTC()
 	}
 	if sb.db.CheckStatus() {
 		sb.db.AddMember(SBatoi(u.User.ID), SBatoi(info.ID), t, u.Nick)
@@ -488,9 +489,10 @@ func (info *GuildInfo) memberBulkUpdate(members []*discordgo.Member) {
 
 	for _, m := range members {
 		valueStrings = append(valueStrings, "(?,?,?,?,UTC_TIMESTAMP())")
-		t := time.Now().UTC()
-		if len(m.JoinedAt) > 0 { // Parse join date and update user table only if it is less than our current first seen date.
-			t, _ = time.Parse(time.RFC3339, m.JoinedAt)
+		// In newer discordgo, JoinedAt is already time.Time
+		t := m.JoinedAt
+		if t.IsZero() {
+			t = time.Now().UTC()
 		}
 		valueArgs = append(valueArgs, SBatoi(m.User.ID), SBatoi(info.ID), t, m.Nick)
 	}

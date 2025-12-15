@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // MarkovModule generates content using markov chains

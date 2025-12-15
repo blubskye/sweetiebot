@@ -9,7 +9,7 @@ import (
 
 	"strconv"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // ConfigModule manages Sweetie Bot's configuration file
@@ -420,14 +420,18 @@ func (c *setupCommand) Process(args []string, msg *discordgo.Message, indices []
 		info.config.Log.Channel = SBatoi(log)
 	}
 
-	silent, err := sb.dg.GuildRoleCreate(info.ID)
+	// Create silence role with permissions that allow reading but not sending
+	hoist := false
+	mentionable := false
+	permissions := int64(0x00000400) // VIEW_CHANNEL only
+	silent, err := sb.dg.GuildRoleCreate(info.ID, &discordgo.RoleParams{
+		Name:        "Silence",
+		Hoist:       &hoist,
+		Permissions: &permissions,
+		Mentionable: &mentionable,
+	})
 	if err != nil {
 		return fmt.Sprintf("```Failed to create the silent role! %s```", err.Error()), false, nil
-	}
-	_, err = sb.dg.GuildRoleEdit(info.ID, silent.ID, "Silence", 0, false, 0x00000400, false)
-	if err != nil {
-		sb.dg.GuildRoleDelete(info.ID, silent.ID)
-		return fmt.Sprintf("```Failed to set up the silent role! %s```", err.Error()), false, nil
 	}
 
 	info.config.Basic.AlertRole = SBatoi(mod)

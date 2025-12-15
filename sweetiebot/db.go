@@ -5,11 +5,28 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 	_ "github.com/go-sql-driver/mysql"
 )
+
+// Go 1.25 optimization: sync.Pool for frequently allocated string slices
+var stringSlicePool = sync.Pool{
+	New: func() interface{} {
+		s := make([]string, 0, 16)
+		return &s
+	},
+}
+
+// Go 1.25 optimization: sync.Pool for uint64 slices
+var uint64SlicePool = sync.Pool{
+	New: func() interface{} {
+		s := make([]uint64, 0, 8)
+		return &s
+	},
+}
 
 type BotDB struct {
 	db                        *sql.DB
@@ -53,6 +70,7 @@ type BotDB struct {
 	sqlGetRandomWord          *sql.Stmt
 	sqlGetTableCounts         *sql.Stmt
 	sqlCountNewUsers          *sql.Stmt
+	sqlGetNewUsersWithCount   *sql.Stmt
 	sqlAudit                  *sql.Stmt
 	sqlGetAuditRows           *sql.Stmt
 	sqlGetAuditRowsUser       *sql.Stmt
@@ -182,20 +200,24 @@ func (db *BotDB) LoadStatements() error {
 	db.sqlGetMarkovLine, err = db.Prepare("SELECT GetMarkovLine(?)")
 	db.sqlGetMarkovLine2, err = db.Prepare("SELECT GetMarkovLine2(?,?)")
 	db.sqlGetMarkovWord, err = db.Prepare("SELECT Phrase FROM markov_transcripts WHERE SpeakerID = (SELECT ID FROM markov_transcripts_speaker WHERE Speaker = ?) AND Phrase = ?")
-	db.sqlGetRandomQuoteInt, err = db.Prepare("SELECT FLOOR(RAND()*(SELECT COUNT(*) FROM transcripts WHERE Text != ''))")
-	db.sqlGetRandomQuote, err = db.Prepare("SELECT * FROM transcripts WHERE Text != '' LIMIT 1 OFFSET ?")
-	db.sqlGetSpeechQuoteInt, err = db.Prepare("SELECT FLOOR(RAND()*(SELECT COUNT(*) FROM transcripts WHERE Speaker != 'ACTION' AND Text != ''))")
-	db.sqlGetSpeechQuote, err = db.Prepare("SELECT * FROM transcripts WHERE Speaker != 'ACTION' AND Text != '' LIMIT 1 OFFSET ?")
-	db.sqlGetCharacterQuoteInt, err = db.Prepare("SELECT FLOOR(RAND()*(SELECT COUNT(*) FROM transcripts WHERE Speaker = ? AND Text != ''))")
-	db.sqlGetCharacterQuote, err = db.Prepare("SELECT * FROM transcripts WHERE Speaker = ? AND Text != '' LIMIT 1 OFFSET ?")
-	db.sqlGetRandomSpeakerInt, err = db.Prepare("SELECT FLOOR(RAND()*(SELECT COUNT(*) FROM markov_transcripts_speaker))")
-	db.sqlGetRandomSpeaker, err = db.Prepare("SELECT Speaker FROM markov_transcripts_speaker LIMIT 1 OFFSET ?")
-	db.sqlGetRandomMemberInt, err = db.Prepare("SELECT FLOOR(RAND()*(SELECT COUNT(*) FROM members WHERE Guild = ?))")
-	db.sqlGetRandomMember, err = db.Prepare("SELECT U.Username FROM members M INNER JOIN users U ON M.ID = U.ID WHERE M.Guild = ? LIMIT 1 OFFSET ?")
-	db.sqlGetRandomWordInt, err = db.Prepare("SELECT FLOOR(RAND()*(SELECT COUNT(*) FROM randomwords))")
-	db.sqlGetRandomWord, err = db.Prepare("SELECT Phrase FROM randomwords LIMIT 1 OFFSET ?;")
+	// Optimized random selection queries using ORDER BY RAND() LIMIT 1
+	// This is faster for small-medium tables than COUNT + OFFSET pattern
+	// For very large tables, consider sampling by ID range instead
+	db.sqlGetRandomQuoteInt, err = db.Prepare("SELECT 0") // Dummy query, not used with optimized version
+	db.sqlGetRandomQuote, err = db.Prepare("SELECT Season, Episode, Line, Speaker, Text FROM transcripts WHERE Text != '' ORDER BY RAND() LIMIT 1")
+	db.sqlGetSpeechQuoteInt, err = db.Prepare("SELECT 0") // Dummy query
+	db.sqlGetSpeechQuote, err = db.Prepare("SELECT Season, Episode, Line, Speaker, Text FROM transcripts WHERE Speaker != 'ACTION' AND Text != '' ORDER BY RAND() LIMIT 1")
+	db.sqlGetCharacterQuoteInt, err = db.Prepare("SELECT 0") // Dummy query
+	db.sqlGetCharacterQuote, err = db.Prepare("SELECT Season, Episode, Line, Speaker, Text FROM transcripts WHERE Speaker = ? AND Text != '' ORDER BY RAND() LIMIT 1")
+	db.sqlGetRandomSpeakerInt, err = db.Prepare("SELECT 0") // Dummy query
+	db.sqlGetRandomSpeaker, err = db.Prepare("SELECT Speaker FROM markov_transcripts_speaker ORDER BY RAND() LIMIT 1")
+	db.sqlGetRandomMemberInt, err = db.Prepare("SELECT 0") // Dummy query
+	db.sqlGetRandomMember, err = db.Prepare("SELECT U.Username FROM members M INNER JOIN users U ON M.ID = U.ID WHERE M.Guild = ? ORDER BY RAND() LIMIT 1")
+	db.sqlGetRandomWordInt, err = db.Prepare("SELECT 0") // Dummy query
+	db.sqlGetRandomWord, err = db.Prepare("SELECT Phrase FROM randomwords ORDER BY RAND() LIMIT 1")
 	db.sqlGetTableCounts, err = db.Prepare("SELECT CONCAT('Chatlog: ', (SELECT COUNT(*) FROM chatlog), ' rows', '\nEditlog: ', (SELECT COUNT(*) FROM editlog), ' rows',  '\nAliases: ', (SELECT COUNT(*) FROM aliases), ' rows',  '\nDebuglog: ', (SELECT COUNT(*) FROM debuglog), ' rows',  '\nUsers: ', (SELECT COUNT(*) FROM users), ' rows',  '\nSchedule: ', (SELECT COUNT(*) FROM schedule), ' rows \nMembers: ', (SELECT COUNT(*) FROM members), ' rows');")
 	db.sqlCountNewUsers, err = db.Prepare("SELECT COUNT(*) FROM members WHERE FirstSeen > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? SECOND) AND Guild = ?")
+	db.sqlGetNewUsersWithCount, err = db.Prepare("SELECT U.ID, U.Email, U.Username, U.Avatar, M.FirstSeen FROM members M INNER JOIN users U ON M.ID = U.ID WHERE M.Guild = ? AND M.FirstSeen > DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? SECOND) ORDER BY M.FirstSeen DESC")
 	db.sqlAudit, err = db.Prepare("INSERT INTO debuglog (Type, User, Message, Timestamp, Guild) VALUE(?, ?, ?, UTC_TIMESTAMP(), ?)")
 	db.sqlGetAuditRows, err = db.Prepare("SELECT U.Username, D.Message, D.Timestamp, U.ID FROM debuglog D INNER JOIN users U ON D.User = U.ID WHERE D.Type = ? AND D.Guild = ? ORDER BY D.Timestamp DESC LIMIT ? OFFSET ?")
 	db.sqlGetAuditRowsUser, err = db.Prepare("SELECT U.Username, D.Message, D.Timestamp, U.ID FROM debuglog D INNER JOIN users U ON D.User = U.ID WHERE D.Type = ? AND D.Guild = ? AND D.User = ? ORDER BY D.Timestamp DESC LIMIT ? OFFSET ?")
@@ -336,9 +358,8 @@ func (db *BotDB) GetMember(id uint64, guild uint64) (*discordgo.Member, time.Tim
 	var joinedat time.Time
 	var discriminator int = 0
 	err := db.sqlGetMember.QueryRow(id, guild).Scan(&m.User.ID, &m.User.Email, &m.User.Username, &discriminator, &m.User.Avatar, &lastseen, &m.Nick, &joinedat, &firstmessage)
-	if !joinedat.IsZero() {
-		m.JoinedAt = joinedat.Format(time.RFC3339)
-	}
+	// In newer discordgo, JoinedAt is time.Time directly
+	m.JoinedAt = joinedat
 	if discriminator > 0 {
 		m.User.Discriminator = strconv.Itoa(discriminator)
 	}
@@ -359,7 +380,7 @@ func (db *BotDB) FindGuildUsers(name string, maxresults uint64, offset uint64, g
 		return []uint64{}
 	}
 	defer q.Close()
-	r := make([]uint64, 0, 4)
+	r := make([]uint64, 0, maxresults) // Pre-allocate for expected results
 	for q.Next() {
 		var p uint64
 		if err := q.Scan(&p); err == nil {
@@ -375,7 +396,7 @@ func (db *BotDB) FindUsers(name string, maxresults uint64, offset uint64) []uint
 		return []uint64{}
 	}
 	defer q.Close()
-	r := make([]uint64, 0, 4)
+	r := make([]uint64, 0, maxresults) // Pre-allocate for expected results
 	for q.Next() {
 		var p uint64
 		if err := q.Scan(&p); err == nil {
@@ -604,65 +625,41 @@ func (db *BotDB) GetMarkovWord(speaker string, phrase string) string {
 	return r
 }
 func (db *BotDB) GetRandomQuote() Transcript {
-	var i uint64
-	err := db.sqlGetRandomQuoteInt.QueryRow().Scan(&i)
 	var p Transcript
-	if !db.CheckError("GetRandomQuoteInt", err) {
-		err = db.sqlGetRandomQuote.QueryRow(i).Scan(&p.Season, &p.Episode, &p.Line, &p.Speaker, &p.Text)
-		db.CheckError("GetRandomQuote", err)
-	}
+	err := db.sqlGetRandomQuote.QueryRow().Scan(&p.Season, &p.Episode, &p.Line, &p.Speaker, &p.Text)
+	db.CheckError("GetRandomQuote", err)
 	return p
 }
 func (db *BotDB) GetSpeechQuote() Transcript {
-	var i uint64
-	err := db.sqlGetSpeechQuoteInt.QueryRow().Scan(&i)
 	var p Transcript
-	if !db.CheckError("GetSpeechQuoteInt", err) {
-		err = db.sqlGetSpeechQuote.QueryRow(i).Scan(&p.Season, &p.Episode, &p.Line, &p.Speaker, &p.Text)
-		db.CheckError("GetSpeechQuote", err)
-	}
+	err := db.sqlGetSpeechQuote.QueryRow().Scan(&p.Season, &p.Episode, &p.Line, &p.Speaker, &p.Text)
+	db.CheckError("GetSpeechQuote", err)
 	return p
 }
 func (db *BotDB) GetCharacterQuote(character string) Transcript {
-	var i uint64
-	err := db.sqlGetCharacterQuoteInt.QueryRow(character).Scan(&i)
 	var p Transcript
-	if !db.CheckError("GetCharacterQuoteInt ", err) {
-		err = db.sqlGetCharacterQuote.QueryRow(character, i).Scan(&p.Season, &p.Episode, &p.Line, &p.Speaker, &p.Text)
-		if err == sql.ErrNoRows || db.CheckError("GetCharacterQuote ", err) {
-			return Transcript{0, 0, 0, "", ""}
-		}
+	err := db.sqlGetCharacterQuote.QueryRow(character).Scan(&p.Season, &p.Episode, &p.Line, &p.Speaker, &p.Text)
+	if err == sql.ErrNoRows || db.CheckError("GetCharacterQuote", err) {
+		return Transcript{0, 0, 0, "", ""}
 	}
 	return p
 }
 func (db *BotDB) GetRandomSpeaker() string {
-	var i uint64
-	err := db.sqlGetRandomSpeakerInt.QueryRow().Scan(&i)
 	var p string
-	if !db.CheckError("GetRandomSpeakerInt", err) {
-		err = db.sqlGetRandomSpeaker.QueryRow(i).Scan(&p)
-		db.CheckError("GetRandomSpeaker", err)
-	}
+	err := db.sqlGetRandomSpeaker.QueryRow().Scan(&p)
+	db.CheckError("GetRandomSpeaker", err)
 	return p
 }
 func (db *BotDB) GetRandomMember(guild uint64) string {
-	var i uint64
-	err := db.sqlGetRandomMemberInt.QueryRow(guild).Scan(&i)
 	var p string
-	if !db.CheckError("GetRandomMemberInt", err) {
-		err = db.sqlGetRandomMember.QueryRow(guild, i).Scan(&p)
-		db.CheckError("GetRandomMember", err)
-	}
+	err := db.sqlGetRandomMember.QueryRow(guild).Scan(&p)
+	db.CheckError("GetRandomMember", err)
 	return p
 }
 func (db *BotDB) GetRandomWord() string {
-	var i uint64
-	err := db.sqlGetRandomWordInt.QueryRow().Scan(&i)
 	var p string
-	if !db.CheckError("GetRandomWordInt", err) {
-		err = db.sqlGetRandomWord.QueryRow(i).Scan(&p)
-		db.CheckError("GetRandomWord", err)
-	}
+	err := db.sqlGetRandomWord.QueryRow().Scan(&p)
+	db.CheckError("GetRandomWord", err)
 	return p
 }
 func (db *BotDB) CountNewUsers(seconds int64, guild uint64) int {
@@ -670,6 +667,33 @@ func (db *BotDB) CountNewUsers(seconds int64, guild uint64) int {
 	err := db.sqlCountNewUsers.QueryRow(seconds, guild).Scan(&i)
 	db.CheckError("CountNewUsers", err)
 	return i
+}
+
+// GetNewUsersWithCount returns new users from the last N seconds along with the count
+// This combines CountNewUsers and GetNewestUsers into a single database query
+func (db *BotDB) GetNewUsersWithCount(seconds int64, guild uint64) ([]struct {
+	User      *discordgo.User
+	FirstSeen time.Time
+}, int) {
+	q, err := db.sqlGetNewUsersWithCount.Query(guild, seconds)
+	if db.CheckError("GetNewUsersWithCount", err) {
+		return nil, 0
+	}
+	defer q.Close()
+	r := make([]struct {
+		User      *discordgo.User
+		FirstSeen time.Time
+	}, 0, 32) // Reasonable pre-allocation for raid detection
+	for q.Next() {
+		p := struct {
+			User      *discordgo.User
+			FirstSeen time.Time
+		}{&discordgo.User{}, time.Now()}
+		if err := q.Scan(&p.User.ID, &p.User.Email, &p.User.Username, &p.User.Avatar, &p.FirstSeen); err == nil {
+			r = append(r, p)
+		}
+	}
+	return r, len(r)
 }
 
 func (db *BotDB) RemoveSchedule(id uint64) {

@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // SpoilerModule picks a random action to do whenever #manechat has been idle for several minutes (configurable)

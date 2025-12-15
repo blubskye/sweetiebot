@@ -7,7 +7,7 @@ import (
 
 	"strconv"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 type DebugModule struct {
@@ -205,7 +205,9 @@ func (c *disableCommand) Usage(info *GuildInfo) *CommandUsage {
 		},
 	}
 }
-func (c *disableCommand) UsageShort() string { return "Disables the given module/command, if possible." }
+func (c *disableCommand) UsageShort() string {
+	return "Disables the given module/command, if possible."
+}
 
 type enableCommand struct {
 }

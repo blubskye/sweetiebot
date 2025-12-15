@@ -1,6 +1,6 @@
 package sweetiebot
 
-import "github.com/blackhole12/discordgo"
+import "github.com/bwmarrin/discordgo"
 import "fmt"
 import "strings"
 
@@ -143,10 +143,11 @@ func (c *addRoleCommand) Process(args []string, msg *discordgo.Message, indices 
 	if check != nil {
 		return "```That's already a role name in this server. If you want to set an existing role as user-assignable, you must ping the role.```", false, nil
 	}
-	r, err := sb.dg.GuildRoleCreate(info.ID)
-	if err == nil {
-		r, err = sb.dg.GuildRoleEdit(info.ID, r.ID, role, 0, false, 0, true)
-	}
+	mentionable := true
+	r, err := sb.dg.GuildRoleCreate(info.ID, &discordgo.RoleParams{
+		Name:        role,
+		Mentionable: &mentionable,
+	})
 	if err != nil {
 		return "```Could not create role! " + err.Error() + "```", false, nil
 	}

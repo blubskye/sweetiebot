@@ -3,11 +3,13 @@ module github.com/blackhole12/sweetiebot
 go 1.25
 
 require (
+	github.com/bwmarrin/discordgo v0.28.1
 	github.com/go-sql-driver/mysql v1.8.1
 )
 
-// Note: This project uses a forked version of discordgo from github.com/blackhole12/discordgo
-// The fork may need to be manually installed or replaced with a more modern discordgo fork.
-// If you encounter issues, you may need to use:
-//   go mod edit -replace github.com/blackhole12/discordgo=github.com/bwmarrin/discordgo@latest
-// However, this may require code changes due to API differences.
+require (
+	filippo.io/edwards25519 v1.1.0 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
+	golang.org/x/crypto v0.46.0 // indirect
+	golang.org/x/sys v0.39.0 // indirect
+)

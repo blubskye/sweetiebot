@@ -3,7 +3,7 @@ package sweetiebot
 import (
 	"fmt"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // StatusModule manages Sweetie Bot's status
@@ -33,12 +33,12 @@ func (c *setStatusCommand) Name() string {
 }
 func (c *setStatusCommand) Process(args []string, msg *discordgo.Message, indices []int, info *GuildInfo) (string, bool, *discordgo.MessageEmbed) {
 	if len(args) < 1 {
-		sb.dg.UpdateStatus(0, "")
+		sb.dg.UpdateGameStatus(0, "")
 		return "```Removed status```", false, nil
 	}
 	arg := msg.Content[indices[0]:]
-	fmt.Printf(arg)
-	sb.dg.UpdateStatus(0, arg)
+	fmt.Printf("%s", arg)
+	sb.dg.UpdateGameStatus(0, arg)
 	return "```Set status to " + arg + "```", false, nil
 }
 func (c *setStatusCommand) Usage(info *GuildInfo) *CommandUsage {

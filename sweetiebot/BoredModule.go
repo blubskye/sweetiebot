@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
 // BoredModule picks a random action to do whenever #manechat has been idle for several minutes (configurable)
@@ -37,7 +37,7 @@ func (w *BoredModule) OnIdle(info *GuildInfo, c *discordgo.Channel) {
 				Verified: true,
 				Bot:      true,
 			},
-			Timestamp: discordgo.Timestamp(time.Now().UTC().Format(time.RFC3339Nano)),
+			Timestamp: time.Now().UTC(),
 		}
 		fmt.Println("Sending bored command ", m.Content, " on ", id)
 

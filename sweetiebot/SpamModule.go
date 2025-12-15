@@ -9,10 +9,13 @@ import (
 
 	"math"
 
-	"github.com/blackhole12/discordgo"
+	"github.com/bwmarrin/discordgo"
 )
 
+// userPressure tracks spam pressure for a single user
+// Go 1.25 optimization: Added per-user mutex to fix race condition on field access
 type userPressure struct {
+	sync.Mutex
 	pressure    float32
 	lastmessage int64
 	lastcache   string
@@ -95,12 +98,17 @@ func killSpammer(u *discordgo.User, info *GuildInfo, msg *discordgo.Message, rea
 		sb.dg.ChannelMessageDelete(msg.ChannelID, msg.ID)
 	}
 
-	msgembeds := ""
+	// Go 1.25 optimization: Use strings.Builder for efficient string concatenation
+	var msgembeds string
 	if len(msg.Embeds) > 0 {
-		msgembeds = "\nEmbedded URLs: "
+		var sb strings.Builder
+		sb.WriteString("\nEmbedded URLs: ")
 		for _, v := range msg.Embeds {
-			msgembeds += "\n<" + v.URL + ">"
+			sb.WriteString("\n<")
+			sb.WriteString(v.URL)
+			sb.WriteByte('>')
 		}
+		msgembeds = sb.String()
 	}
 
 	chname := msg.ChannelID
@@ -135,9 +143,8 @@ func killSpammer(u *discordgo.User, info *GuildInfo, msg *discordgo.Message, rea
 			}
 			lastid = messages[len(messages)-1].ID
 			for _, v := range messages {
-				tm, terr := v.Timestamp.Parse()
-				info.LogError("Error encountered while attempting to parse timestamp: ", terr)
-				if terr != nil || tm.Before(endtime) {
+				// In newer discordgo, Timestamp is already time.Time
+				if v.Timestamp.Before(endtime) {
 					break EndLoop // break out of both loops
 				}
 				if v.Author.ID == u.ID {
@@ -183,21 +190,33 @@ func (w *SpamModule) checkSpam(info *GuildInfo, m *discordgo.Message, edited boo
 			return false
 		}
 		id := SBatoi(m.Author.ID)
-		tm, err := m.Timestamp.Parse()
-		if len(m.EditedTimestamp) > 0 {
-			tm, err = m.EditedTimestamp.Parse()
+		// In newer discordgo, Timestamp is already time.Time
+		tm := m.Timestamp
+		if m.EditedTimestamp != nil {
+			tm = *m.EditedTimestamp
 		}
-		if err != nil {
-			fmt.Println("Error parsing discord timestamp: ", m)
+		if tm.IsZero() {
 			tm = time.Now().UTC()
 		}
+
+		// Get or create user tracker with map lock
 		w.Lock()
-		_, ok := w.tracker[id]
+		track, ok := w.tracker[id]
 		if !ok {
-			w.tracker[id] = &userPressure{0, tm.Unix()*1000 + int64(tm.Nanosecond()/1000000), ""}
+			track = &userPressure{
+				pressure:    0,
+				lastmessage: tm.Unix()*1000 + int64(tm.Nanosecond()/1000000),
+				lastcache:   "",
+			}
+			w.tracker[id] = track
 		}
-		track := w.tracker[id]
 		w.Unlock()
+
+		// Lock the individual user tracker for thread-safe field access
+		// Go 1.25 optimization: Per-user lock prevents race conditions
+		track.Lock()
+		defer track.Unlock()
+
 		p := getPressure(info, m, edited)
 		if len(m.Content) > 0 && strings.ToLower(m.Content) == track.lastcache {
 			p += info.config.Spam.RepeatPressure
@@ -253,16 +272,8 @@ func DisableLockdown(info *GuildInfo) {
 		} else if guild.VerificationLevel != discordgo.VerificationLevelHigh {
 			info.SendMessage(modchan, fmt.Sprintf("The verification level is at %v instead of %v, which means it was manually changed by someone other than sweetiebot, so it has not been restored.", guild.VerificationLevel, discordgo.VerificationLevelHigh))
 		} else {
-			g := discordgo.GuildParams{
-				Name:                        "",
-				Region:                      "",
-				VerificationLevel:           &info.lockdown,
-				DefaultMessageNotifications: 0,
-				AfkChannelID:                "",
-				AfkTimeout:                  0,
-				Icon:                        "",
-				OwnerID:                     "",
-				Splash:                      "",
+			g := &discordgo.GuildParams{
+				VerificationLevel: &info.lockdown,
 			}
 			_, err = sb.dg.GuildEdit(info.ID, g)
 		}
@@ -279,9 +290,9 @@ func (w *SpamModule) checkRaid(info *GuildInfo, m *discordgo.Member) {
 	if !sb.db.CheckStatus() {
 		return
 	}
-	raidsize := sb.db.CountNewUsers(info.config.Spam.RaidTime, SBatoi(info.ID))
+	// Single query instead of CountNewUsers + GetNewestUsers
+	r, raidsize := sb.db.GetNewUsersWithCount(info.config.Spam.RaidTime, SBatoi(info.ID))
 	if info.config.Spam.RaidSize > 0 && raidsize >= info.config.Spam.RaidSize && RateLimit(&w.lastraid, info.config.Spam.RaidTime*2) {
-		r := sb.db.GetNewestUsers(raidsize, SBatoi(info.ID))
 		s := make([]string, 0, len(r))
 
 		for _, v := range r {
@@ -304,7 +315,7 @@ func (w *SpamModule) checkRaid(info *GuildInfo, m *discordgo.Member) {
 					info.lockdown = guild.VerificationLevel
 				}
 				level := discordgo.VerificationLevelHigh
-				g := discordgo.GuildParams{"", "", &level, 0, "", 0, "", "", ""}
+				g := &discordgo.GuildParams{VerificationLevel: &level}
 				_, err = sb.dg.GuildEdit(info.ID, g)
 				if err != nil {
 					info.SendMessage(ch, "Could not engage lockdown! Make sure you've given Sweetie Bot the Manage Server permission, or disable the lockdown entirely via `"+info.config.Basic.CommandPrefix+"setconfig spam.lockdownduration 0`.")
@@ -444,8 +455,8 @@ func (c *wipeCommand) WipeMessages(ch string, num int, seconds int) (int, error)
 		IDs := make([]string, 0, len(list))
 		for i := 0; i < len(list) && ret < num; i++ {
 			if seconds > 0 {
-				t, err := list[i].Timestamp.Parse()
-				if err != nil || t.Before(date) {
+				// In newer discordgo, Timestamp is already time.Time
+				if list[i].Timestamp.Before(date) {
 					break
 				}
 			}
@@ -523,7 +534,10 @@ func (c *getPressureCommand) Process(args []string, msg *discordgo.Message, indi
 	if !ok {
 		return "0", false, nil
 	}
-	return fmt.Sprint(u.pressure), false, nil
+	u.Lock()
+	pressure := u.pressure
+	u.Unlock()
+	return fmt.Sprint(pressure), false, nil
 }
 func (c *getPressureCommand) Usage(info *GuildInfo) *CommandUsage {
 	return &CommandUsage{
